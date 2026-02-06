@@ -251,14 +251,25 @@ where
                     all_removed.extend(result.removed);
                 }
                 Err(err) => {
-                    error!(
-                        "request_id={} stage={:?} component={} failed: {}",
-                        request_id,
-                        stage,
-                        filter.name(),
-                        err
-                    );
-                    candidates = backup;
+                    if filter.is_safety_critical() {
+                        error!(
+                            "request_id={} stage={:?} component={} SAFETY-CRITICAL filter failed, dropping ALL candidates: {}",
+                            request_id,
+                            stage,
+                            filter.name(),
+                            err
+                        );
+                        candidates = Vec::new();
+                    } else {
+                        error!(
+                            "request_id={} stage={:?} component={} failed (non-critical, restoring backup): {}",
+                            request_id,
+                            stage,
+                            filter.name(),
+                            err
+                        );
+                        candidates = backup;
+                    }
                 }
             }
         }
