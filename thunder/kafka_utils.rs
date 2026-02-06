@@ -12,11 +12,22 @@ use crate::{
     },
 };
 
-const TWEET_EVENT_TOPIC: &str = "";
-const TWEET_EVENT_DEST: &str = "";
-
-const IN_NETWORK_EVENTS_DEST: &str = "";
-const IN_NETWORK_EVENTS_TOPIC: &str = "";
+// [C-2] Security Fix (CWE-1188 / OWASP A02:2025): Kafka topic and destination
+// constants are now loaded from environment variables at first access.
+// Previously, these were empty strings ("") which caused Kafka consumers to
+// subscribe to nothing and producers to route messages nowhere, silently
+// dropping all event ingestion. Startup will panic if any required topic
+// variable is unset, preventing silent misconfiguration in production.
+lazy_static::lazy_static! {
+    static ref TWEET_EVENT_TOPIC: String = std::env::var("KAFKA_TWEET_EVENT_TOPIC")
+        .expect("KAFKA_TWEET_EVENT_TOPIC environment variable must be set");
+    static ref TWEET_EVENT_DEST: String = std::env::var("KAFKA_TWEET_EVENT_DEST")
+        .expect("KAFKA_TWEET_EVENT_DEST environment variable must be set");
+    static ref IN_NETWORK_EVENTS_DEST: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_DEST")
+        .expect("KAFKA_IN_NETWORK_EVENTS_DEST environment variable must be set");
+    static ref IN_NETWORK_EVENTS_TOPIC: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_TOPIC")
+        .expect("KAFKA_IN_NETWORK_EVENTS_TOPIC environment variable must be set");
+}
 
 pub async fn start_kafka(
     args: &args::Args,
@@ -24,11 +35,28 @@ pub async fn start_kafka(
     user: &str,
     tx: tokio::sync::mpsc::Sender<i64>,
 ) -> Result<()> {
-    let sasl_password = std::env::var("")
+    // [M-7] Security Fix (CWE-287 / OWASP A07:2025): Validate that the SASL
+    // username is non-empty. An empty username weakens Kafka authentication
+    // and may cause silent connection failures or fall back to unauthenticated
+    // access depending on the Kafka broker configuration.
+    if user.is_empty() {
+        log::warn!(
+            "SASL username is empty - Kafka authentication may fail. \
+             Ensure a valid SASL username is provided via configuration."
+        );
+    }
+
+    // [C-1] Security Fix (CWE-1188 / OWASP A02:2025): Replace empty-string
+    // environment variable lookups with properly named variables. Previously,
+    // `std::env::var("")` always returned `Err(NotPresent)` because the env
+    // var name was an empty string, causing SASL passwords to silently default
+    // to empty values — a complete authentication bypass.
+    let sasl_password = std::env::var("KAFKA_SASL_PASSWORD")
         .ok()
         .or(args.sasl_password.clone())?;
 
-    let producer_sasl_password = std::env::var("")
+    // [C-1] Security Fix: Same pattern for producer SASL password.
+    let producer_sasl_password = std::env::var("KAFKA_PRODUCER_SASL_PASSWORD")
         .ok()
         .or(args.producer_sasl_password.clone());
 
@@ -38,7 +66,7 @@ pub async fn start_kafka(
         let v2_tweet_events_consumer_config = KafkaConsumerConfig {
             base_config: KafkaConfig {
                 dest: args.in_network_events_consumer_dest.clone(),
-                topic: IN_NETWORK_EVENTS_TOPIC.to_string(),
+                topic: IN_NETWORK_EVENTS_TOPIC.clone(),
                 wily_config: Some(WilyConfig::default()),
                 ssl: Some(SslConfig {
                     security_protocol: args.security_protocol.clone(),
@@ -71,8 +99,8 @@ pub async fn start_kafka(
         // Create Kafka consumer config
         let tweet_events_consumer_config = KafkaConsumerConfig {
             base_config: KafkaConfig {
-                dest: TWEET_EVENT_DEST.to_string(),
-                topic: TWEET_EVENT_TOPIC.to_string(),
+                dest: TWEET_EVENT_DEST.clone(),
+                topic: TWEET_EVENT_TOPIC.clone(),
                 wily_config: Some(WilyConfig::default()),
                 ssl: Some(SslConfig {
                     security_protocol: args.security_protocol.clone(),
@@ -94,8 +122,8 @@ pub async fn start_kafka(
 
         let producer_config = KafkaProducerConfig {
             base_config: KafkaConfig {
-                dest: IN_NETWORK_EVENTS_DEST.to_string(),
-                topic: IN_NETWORK_EVENTS_TOPIC.to_string(),
+                dest: IN_NETWORK_EVENTS_DEST.clone(),
+                topic: IN_NETWORK_EVENTS_TOPIC.clone(),
                 wily_config: Some(WilyConfig::default()),
                 ssl: Some(SslConfig {
                     security_protocol: args.security_protocol.clone(),

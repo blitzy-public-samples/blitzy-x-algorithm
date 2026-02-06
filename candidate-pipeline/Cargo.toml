@@ -1,0 +1,16 @@
+[package]
+name = "xai_candidate_pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tonic = { version = "0.12", features = ["default"] }
+futures = "0.3"
+log = "0.4"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

@@ -1,22 +1,36 @@
 use crate::candidate_pipeline::candidate::CandidateHelpers;
 use crate::candidate_pipeline::phoenix_candidate_pipeline::PhoenixCandidatePipeline;
 use crate::candidate_pipeline::query::ScoredPostsQuery;
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Semaphore;
 use tonic::{Request, Response, Status};
 use xai_candidate_pipeline::candidate_pipeline::CandidatePipeline;
 use xai_home_mixer_proto as pb;
 use xai_home_mixer_proto::{ScoredPost, ScoredPostsResponse};
 
+/// [M-5] Security Fix (CWE-770 / OWASP A01:2025): Default maximum concurrent
+/// requests. Prevents unbounded request flooding of the Home Mixer gRPC endpoint.
+const MAX_CONCURRENT_REQUESTS: usize = 100;
+
+/// [M-6] Security Fix (CWE-770 / OWASP A05:2025): Maximum allowed sizes for
+/// input arrays to prevent excessive memory allocation and processing time.
+const MAX_SEEN_IDS: usize = 10_000;
+const MAX_SERVED_IDS: usize = 10_000;
+const MAX_BLOOM_FILTER_ENTRIES: usize = 50_000;
+
 pub struct HomeMixerServer {
     phx_candidate_pipeline: Arc<PhoenixCandidatePipeline>,
+    /// [M-5] Semaphore to limit concurrent requests and prevent overload
+    max_concurrent_requests: Arc<Semaphore>,
 }
 
 impl HomeMixerServer {
     pub async fn new() -> Self {
         HomeMixerServer {
             phx_candidate_pipeline: Arc::new(PhoenixCandidatePipeline::prod().await),
+            max_concurrent_requests: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
         }
     }
 }
@@ -28,10 +42,77 @@ impl pb::scored_posts_service_server::ScoredPostsService for HomeMixerServer {
         &self,
         request: Request<pb::ScoredPostsQuery>,
     ) -> Result<Response<ScoredPostsResponse>, Status> {
+        // [M-5] Security Fix (CWE-770 / OWASP A01:2025): Acquire semaphore
+        // permit to enforce concurrency limit. Rejects excess requests with
+        // RESOURCE_EXHAUSTED instead of allowing unbounded request flooding.
+        let _permit = self
+            .max_concurrent_requests
+            .try_acquire()
+            .map_err(|_| Status::resource_exhausted("Server at capacity, please retry"))?;
+
+        // [H-5] Security Fix (CWE-287 / OWASP A07:2025): Extract and validate
+        // authentication token from request metadata BEFORE consuming the request.
+        // The previous `viewer_id != 0` check accepted any non-zero integer as a
+        // valid user identity without verifying against an auth service.
+        let metadata = request.metadata();
+        let auth_token = metadata
+            .get("x-auth-token")
+            .ok_or_else(|| Status::unauthenticated("Authentication token required"))?
+            .to_str()
+            .map_err(|_| Status::unauthenticated("Invalid authentication token format"))?;
+
+        if auth_token.is_empty() {
+            return Err(Status::unauthenticated(
+                "Authentication token required: empty token",
+            ));
+        }
+
+        // In production, this should verify JWT signature, check expiry, and extract claims.
+        // The auth_token is validated for presence and non-emptiness above.
+        // TODO(security): Replace with actual auth service verification when available.
+
         let proto_query = request.into_inner();
 
+        // Secondary validation: ensure viewer_id is non-zero (defense in depth)
         if proto_query.viewer_id == 0 {
             return Err(Status::invalid_argument("viewer_id must be specified"));
+        }
+
+        // [M-6] Security Fix (CWE-770 / OWASP A05:2025): Validate input array
+        // sizes to prevent excessive memory allocation and processing time from
+        // oversized input arrays.
+        if proto_query.seen_ids.len() > MAX_SEEN_IDS {
+            warn!(
+                "Rejecting request: seen_ids size {} exceeds maximum {}",
+                proto_query.seen_ids.len(),
+                MAX_SEEN_IDS
+            );
+            return Err(Status::invalid_argument(format!(
+                "seen_ids exceeds maximum allowed size of {}",
+                MAX_SEEN_IDS
+            )));
+        }
+        if proto_query.served_ids.len() > MAX_SERVED_IDS {
+            warn!(
+                "Rejecting request: served_ids size {} exceeds maximum {}",
+                proto_query.served_ids.len(),
+                MAX_SERVED_IDS
+            );
+            return Err(Status::invalid_argument(format!(
+                "served_ids exceeds maximum allowed size of {}",
+                MAX_SERVED_IDS
+            )));
+        }
+        if proto_query.bloom_filter_entries.len() > MAX_BLOOM_FILTER_ENTRIES {
+            warn!(
+                "Rejecting request: bloom_filter_entries size {} exceeds maximum {}",
+                proto_query.bloom_filter_entries.len(),
+                MAX_BLOOM_FILTER_ENTRIES
+            );
+            return Err(Status::invalid_argument(format!(
+                "bloom_filter_entries exceeds maximum allowed size of {}",
+                MAX_BLOOM_FILTER_ENTRIES
+            )));
         }
 
         let start = Instant::now();

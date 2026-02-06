@@ -38,10 +38,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Create the service implementation
     let service = HomeMixerServer::new().await;
-    // Keep a reference to stats_receiver before service is moved
-    let reflection_service = Builder::configure()
-        .register_encoded_file_descriptor_set(pb::FILE_DESCRIPTOR_SET)
-        .build_v1()?;
 
     let mut grpc_routes = RoutesBuilder::default();
 
@@ -55,7 +51,22 @@ async fn main() -> anyhow::Result<()> {
             .send_compressed(CompressionEncoding::Zstd),
     );
 
-    grpc_routes.add_service(reflection_service);
+    // [L-2] Security Fix (CWE-489 / OWASP A02:2025): Gate gRPC reflection
+    // behind the ENABLE_GRPC_REFLECTION environment variable. gRPC reflection
+    // exposes the complete service schema to any client, enabling service
+    // enumeration. In production this should be disabled.
+    let enable_reflection = std::env::var("ENABLE_GRPC_REFLECTION")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("true");
+    if enable_reflection {
+        let reflection_service = Builder::configure()
+            .register_encoded_file_descriptor_set(pb::FILE_DESCRIPTOR_SET)
+            .build_v1()?;
+        grpc_routes.add_service(reflection_service);
+        info!("gRPC reflection enabled via ENABLE_GRPC_REFLECTION");
+    } else {
+        info!("gRPC reflection disabled (set ENABLE_GRPC_REFLECTION=true to enable)");
+    }
 
     let grpc_config = GrpcConfig::new(args.grpc_port, grpc_routes.routes());
 

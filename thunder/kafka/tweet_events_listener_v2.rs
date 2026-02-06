@@ -98,17 +98,25 @@ fn spawn_processing_threads_v2(
                     )
                     .await
                     {
-                        panic!(
+                        // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                        // with error logging and graceful return. Panicking inside a
+                        // tokio::spawn silently terminates the task with no restart.
+                        log::error!(
                             "Tweet events processing thread {} exited unexpectedly: {:#}. This is a critical failure - the feeder cannot function without tweet event processing.",
                             thread_id, e
                         );
+                        return;
                     }
                 }
                 Err(e) => {
-                    panic!(
+                    // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                    // with error logging and graceful return. Panicking inside a
+                    // tokio::spawn silently terminates the task with no restart.
+                    log::error!(
                         "Failed to create consumer for thread {}: {:#}",
                         thread_id, e
                     );
+                    return;
                 }
             }
         });
@@ -139,7 +147,17 @@ fn deserialize_batch(
     let mut delete_tweets = Vec::with_capacity(10);
 
     for tweet_event in results {
-        match tweet_event.event_variant.unwrap() {
+        // [H-1] Security Fix (CWE-252 / OWASP A10:2025): Replace .unwrap() on
+        // event_variant with safe handling. A single malformed Kafka message with
+        // a missing event_variant previously killed the consumer task.
+        let event_variant = match tweet_event.event_variant {
+            Some(variant) => variant,
+            None => {
+                warn!("Skipping InNetworkEvent with missing event_variant");
+                continue;
+            }
+        };
+        match event_variant {
             in_network_event::EventVariant::TweetCreateEvent(create_event) => {
                 create_tweets.push(LightPost {
                     post_id: create_event.post_id,

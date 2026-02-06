@@ -415,9 +415,14 @@ impl PostStore {
         let retention_seconds = self.retention_seconds;
 
         tokio::task::spawn_blocking(move || {
+            // [L-1] Security Fix (CWE-252 / OWASP A10:2025): Replace .unwrap()
+            // with .unwrap_or_default() to prevent panic on clock anomalies
+            // (e.g., NTP time jumps before epoch). With the default (zero seconds),
+            // the trim operation treats all posts as within retention, preventing
+            // data loss. This matches the safe pattern at lines 88-90.
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs();
 
             let mut total_trimmed = 0;
