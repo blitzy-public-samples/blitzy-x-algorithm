@@ -19,13 +19,13 @@ use crate::{
 // dropping all event ingestion. Startup will panic if any required topic
 // variable is unset, preventing silent misconfiguration in production.
 lazy_static::lazy_static! {
-    static ref TWEET_EVENT_TOPIC: String = std::env::var("KAFKA_TWEET_EVENT_TOPIC")
+    pub static ref TWEET_EVENT_TOPIC: String = std::env::var("KAFKA_TWEET_EVENT_TOPIC")
         .expect("KAFKA_TWEET_EVENT_TOPIC environment variable must be set");
-    static ref TWEET_EVENT_DEST: String = std::env::var("KAFKA_TWEET_EVENT_DEST")
+    pub static ref TWEET_EVENT_DEST: String = std::env::var("KAFKA_TWEET_EVENT_DEST")
         .expect("KAFKA_TWEET_EVENT_DEST environment variable must be set");
-    static ref IN_NETWORK_EVENTS_DEST: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_DEST")
+    pub static ref IN_NETWORK_EVENTS_DEST: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_DEST")
         .expect("KAFKA_IN_NETWORK_EVENTS_DEST environment variable must be set");
-    static ref IN_NETWORK_EVENTS_TOPIC: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_TOPIC")
+    pub static ref IN_NETWORK_EVENTS_TOPIC: String = std::env::var("KAFKA_IN_NETWORK_EVENTS_TOPIC")
         .expect("KAFKA_IN_NETWORK_EVENTS_TOPIC environment variable must be set");
 }
 
