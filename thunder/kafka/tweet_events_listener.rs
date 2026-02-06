@@ -23,11 +23,9 @@ use crate::{
 /// Counter for logging batch processing every Nth time
 static BATCH_LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-/// [M-3] Security Fix (CWE-770 / OWASP A10:2025): Maximum number of messages
-/// allowed in the message buffer to prevent unbounded memory growth from burst
-/// Kafka traffic. If the buffer exceeds this limit, excess messages are dropped
-/// and a warning is logged. This prevents an attacker flooding the Kafka topic
-/// from exhausting Thunder's memory.
+/// Maximum number of messages allowed in the message buffer to prevent unbounded memory growth
+/// from burst Kafka traffic. If the buffer exceeds this limit, excess messages are dropped
+/// and a warning is logged. (Security fix M-3: CWE-770 / OWASP A10:2025)
 const MAX_BUFFER_SIZE: usize = 100_000;
 
 /// Monitor Kafka partition lag and update metrics
