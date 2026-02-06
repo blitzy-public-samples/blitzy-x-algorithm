@@ -12,7 +12,7 @@ use xai_thunder_proto::{
 };
 
 use crate::{
-    crate::config::MIN_VIDEO_DURATION_MS,
+    config::MIN_VIDEO_DURATION_MS,
     args::Args,
     deserializer::deserialize_tweet_event,
     kafka::utils::{create_kafka_consumer, deserialize_kafka_messages},
@@ -294,9 +294,7 @@ async fn process_message_batch(
                     }
                 };
 
-                if let Some(nullcast) = core_data.nullcast
-                    && nullcast
-                {
+                if let Some(true) = core_data.nullcast {
                     continue;
                 }
 

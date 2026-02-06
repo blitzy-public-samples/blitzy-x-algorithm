@@ -17,7 +17,7 @@ use xai_thunder_proto::{
 // in-memory PostStore without identity verification. This interceptor validates
 // the presence of an authentication token in request metadata. Requests without
 // a valid "authorization" header are rejected with UNAUTHENTICATED status.
-fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
+pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     match req.metadata().get("authorization") {
         Some(token) => {
             // Validate the token is valid UTF-8 and non-empty.
@@ -52,6 +52,12 @@ use crate::metrics::{
 use crate::posts::post_store::PostStore;
 use crate::strato_client::StratoClient;
 
+/// The Thunder service implementation for serving in-network posts via gRPC.
+///
+/// All fields use `Arc` for cheap cloning, which is required by tonic's server
+/// routing layer (`Routes::new()` requires `Clone`). This allows the service
+/// to be shared across concurrent gRPC request handlers.
+#[derive(Clone)]
 pub struct ThunderServiceImpl {
     /// PostStore for retrieving posts by user ID
     post_store: Arc<PostStore>,

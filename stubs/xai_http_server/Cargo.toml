@@ -1,0 +1,10 @@
+[package]
+name = "xai_http_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+tonic = { version = "0.12", features = ["default"] }
+tokio = { version = "1", features = ["signal"] }
+anyhow = "1"

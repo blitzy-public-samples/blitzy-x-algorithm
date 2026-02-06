@@ -1,0 +1,39 @@
+[package]
+name = "thunder"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "thunder"
+path = "lib.rs"
+
+[[bin]]
+name = "thunder-server"
+path = "main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.7"
+clap = { version = "4", features = ["derive"] }
+dashmap = "6"
+env_logger = "0.11"
+lazy_static = "1"
+log = "0.4"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.12", features = ["default", "transport", "gzip"] }
+tower = "0.5"
+uuid = { version = "1", features = ["v4"] }
+
+# Internal xai crates (stubs for local development)
+xai_thunder_proto = { path = "../stubs/xai_thunder_proto" }
+xai_kafka = { path = "../stubs/xai_kafka" }
+xai_wily = { path = "../stubs/xai_wily" }
+xai_http_server = { path = "../stubs/xai_http_server" }
+xai_profiling = { path = "../stubs/xai_profiling" }
+thrift = { package = "thrift", path = "../stubs/thrift_stub" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+regex = "1"
+testing_logger = "0.1"
