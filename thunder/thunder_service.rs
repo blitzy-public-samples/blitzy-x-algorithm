@@ -90,8 +90,8 @@ impl ThunderServiceImpl {
         fn(Request<()>) -> Result<Request<()>, Status>,
     > {
         let svc = InNetworkPostsServiceServer::new(self)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd);
+            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
+            .send_compressed(tonic::codec::CompressionEncoding::Gzip);
         InterceptedService::new(
             svc,
             auth_interceptor as fn(Request<()>) -> Result<Request<()>, Status>,
@@ -245,7 +245,15 @@ impl InNetworkPostsService for ThunderServiceImpl {
             // conversion instead of unvalidated `as i64` cast. Large u64 values
             // would silently overflow to negative i64 values.
             let strato_user_id = i64::try_from(req.user_id).map_err(|_| {
-                Status::invalid_argument(format!("user_id {} exceeds valid range", req.user_id))
+                // [M-1 + M-2] Security Fix (CWE-209 / CWE-681): Log the overflow
+                // details internally for debugging, but return only a generic error
+                // message to the client. Exposing the specific value or type
+                // constraints would leak implementation details.
+                warn!(
+                    "user_id {} exceeds valid i64 range for Strato conversion",
+                    req.user_id
+                );
+                Status::invalid_argument("Invalid request")
             })?;
             match self
                 .strato_client
@@ -316,9 +324,10 @@ impl InNetworkPostsService for ThunderServiceImpl {
                 following_count, MAX_INPUT_LIST_SIZE, req.user_id
             );
         }
-        let following_user_ids: Vec<u64> = following_user_ids
+        let following_user_ids: Vec<i64> = following_user_ids
             .into_iter()
             .take(MAX_INPUT_LIST_SIZE)
+            .map(|id| id as i64)
             .collect();
 
         let exclude_count = req.exclude_tweet_ids.len();
@@ -328,10 +337,11 @@ impl InNetworkPostsService for ThunderServiceImpl {
                 exclude_count, MAX_INPUT_LIST_SIZE, req.user_id
             );
         }
-        let exclude_tweet_ids: Vec<u64> = req
+        let exclude_tweet_ids: Vec<i64> = req
             .exclude_tweet_ids
             .into_iter()
             .take(MAX_INPUT_LIST_SIZE)
+            .map(|id| id as i64)
             .collect();
 
         // Clone Arc references needed inside spawn_blocking
@@ -339,7 +349,13 @@ impl InNetworkPostsService for ThunderServiceImpl {
         // [M-2] Security Fix (CWE-681 / OWASP A10:2025): Use checked integer
         // conversion. `req.user_id as i64` silently wraps for u64 values > i64::MAX.
         let request_user_id = i64::try_from(req.user_id).map_err(|_| {
-            Status::invalid_argument(format!("user_id {} exceeds valid range", req.user_id))
+            // [M-1 + M-2] Security Fix (CWE-209 / CWE-681): Log the overflow
+            // details internally but return only a generic error to the client.
+            warn!(
+                "user_id {} exceeds valid i64 range for request processing",
+                req.user_id
+            );
+            Status::invalid_argument("Invalid request")
         })?;
 
         // Use spawn_blocking to avoid blocking tokio's async runtime

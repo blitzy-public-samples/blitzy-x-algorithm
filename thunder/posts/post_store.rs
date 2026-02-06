@@ -147,12 +147,12 @@ impl PostStore {
             let mut video_eligible = post.has_video;
 
             // If this is a retweet and the retweeted post has video, mark has_video as true
-            if !video_eligible
-                && post.is_retweet
-                && let Some(source_post_id) = post.source_post_id
-                && let Some(source_post) = self.posts.get(&source_post_id)
-            {
-                video_eligible = !source_post.is_reply && source_post.has_video;
+            if !video_eligible && post.is_retweet {
+                if let Some(source_post_id) = post.source_post_id {
+                    if let Some(source_post) = self.posts.get(&source_post_id) {
+                        video_eligible = !source_post.is_reply && source_post.has_video;
+                    }
+                }
             }
 
             if post.is_reply {
@@ -292,7 +292,7 @@ impl PostStore {
                     if following_users.is_empty() {
                         return true;
                     }
-                    post.in_reply_to_post_id.is_none_or(|reply_to_post_id| {
+                    post.in_reply_to_post_id.map_or(true, |reply_to_post_id| {
                         if let Some(replied_to_post) = self.posts.get(&reply_to_post_id) {
                             if !replied_to_post.is_retweet && !replied_to_post.is_reply {
                                 return true;
