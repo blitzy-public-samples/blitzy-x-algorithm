@@ -1,12 +1,12 @@
 use anyhow::Result;
 use log::{info, warn};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Semaphore};
-use xai_kafka::{KafkaMessage, config::KafkaConsumerConfig, consumer::KafkaConsumer};
+use xai_kafka::{config::KafkaConsumerConfig, consumer::KafkaConsumer, KafkaMessage};
 
-use xai_thunder_proto::{LightPost, TweetDeleteEvent, in_network_event};
+use xai_thunder_proto::{in_network_event, LightPost, TweetDeleteEvent};
 
 use crate::{
     args::Args,
@@ -114,7 +114,8 @@ fn spawn_processing_threads_v2(
                     // tokio::spawn silently terminates the task with no restart.
                     log::error!(
                         "Failed to create consumer for thread {}: {:#}",
-                        thread_id, e
+                        thread_id,
+                        e
                     );
                     return;
                 }

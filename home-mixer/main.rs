@@ -9,8 +9,8 @@ use tonic_reflection::server::Builder;
 use xai_home_mixer_proto as pb;
 use xai_http_server::{CancellationToken, GrpcConfig, HttpServer};
 
-use xai_home_mixer::HomeMixerServer;
 use xai_home_mixer::params;
+use xai_home_mixer::HomeMixerServer;
 
 #[derive(Parser, Debug)]
 #[command(about = "HomeMixer gRPC Server")]

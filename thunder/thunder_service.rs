@@ -5,12 +5,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
-use tonic::{Request, Response, Status};
 use tonic::service::interceptor::InterceptedService;
+use tonic::{Request, Response, Status};
 
 use xai_thunder_proto::{
-    GetInNetworkPostsRequest, GetInNetworkPostsResponse, LightPost,
     in_network_posts_service_server::{InNetworkPostsService, InNetworkPostsServiceServer},
+    GetInNetworkPostsRequest, GetInNetworkPostsResponse, LightPost,
 };
 
 // [H-3] Security Fix (CWE-306 / OWASP A01:2025): Authentication interceptor
@@ -25,7 +25,9 @@ fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
             // In production, this should verify the token against an identity service
             let token_str = token.to_str().unwrap_or("");
             if token_str.is_empty() {
-                return Err(Status::unauthenticated("Authentication required: empty token"));
+                return Err(Status::unauthenticated(
+                    "Authentication required: empty token",
+                ));
             }
             Ok(req)
         }
@@ -33,16 +35,14 @@ fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     }
 }
 
-use crate::config::{
-    MAX_INPUT_LIST_SIZE, MAX_POSTS_TO_RETURN, MAX_VIDEOS_TO_RETURN,
-};
+use crate::config::{MAX_INPUT_LIST_SIZE, MAX_POSTS_TO_RETURN, MAX_VIDEOS_TO_RETURN};
 use crate::metrics::{
-    GET_IN_NETWORK_POSTS_COUNT, GET_IN_NETWORK_POSTS_DURATION,
+    Timer, GET_IN_NETWORK_POSTS_COUNT, GET_IN_NETWORK_POSTS_DURATION,
     GET_IN_NETWORK_POSTS_DURATION_WITHOUT_STRATO, GET_IN_NETWORK_POSTS_EXCLUDED_SIZE,
     GET_IN_NETWORK_POSTS_FOLLOWING_SIZE, GET_IN_NETWORK_POSTS_FOUND_FRESHNESS_SECONDS,
     GET_IN_NETWORK_POSTS_FOUND_POSTS_PER_AUTHOR, GET_IN_NETWORK_POSTS_FOUND_REPLY_RATIO,
     GET_IN_NETWORK_POSTS_FOUND_TIME_RANGE_SECONDS, GET_IN_NETWORK_POSTS_FOUND_UNIQUE_AUTHORS,
-    GET_IN_NETWORK_POSTS_MAX_RESULTS, IN_FLIGHT_REQUESTS, REJECTED_REQUESTS, Timer,
+    GET_IN_NETWORK_POSTS_MAX_RESULTS, IN_FLIGHT_REQUESTS, REJECTED_REQUESTS,
 };
 use crate::posts::post_store::PostStore;
 use crate::strato_client::StratoClient;
@@ -80,12 +80,17 @@ impl ThunderServiceImpl {
     /// "authorization" header is present in request metadata.
     pub fn server(
         self,
-    ) -> InterceptedService<InNetworkPostsServiceServer<Self>, fn(Request<()>) -> Result<Request<()>, Status>>
-    {
+    ) -> InterceptedService<
+        InNetworkPostsServiceServer<Self>,
+        fn(Request<()>) -> Result<Request<()>, Status>,
+    > {
         let svc = InNetworkPostsServiceServer::new(self)
             .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
             .send_compressed(tonic::codec::CompressionEncoding::Zstd);
-        InterceptedService::new(svc, auth_interceptor as fn(Request<()>) -> Result<Request<()>, Status>)
+        InterceptedService::new(
+            svc,
+            auth_interceptor as fn(Request<()>) -> Result<Request<()>, Status>,
+        )
     }
 
     /// Analyze found posts, calculate statistics, and report metrics
