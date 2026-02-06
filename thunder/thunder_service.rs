@@ -21,17 +21,23 @@ use xai_thunder_proto::{
 fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
     match req.metadata().get("authorization") {
         Some(token) => {
-            // Validate the token format (e.g., Bearer token or mTLS certificate)
+            // Validate the token is valid UTF-8 and non-empty.
             // In production, this should verify the token against an identity service
-            let token_str = token.to_str().unwrap_or("");
+            // or validate the mTLS client certificate.
+            let token_str = token.to_str().map_err(|_| {
+                warn!("Received request with invalid authorization token encoding");
+                Status::unauthenticated("Authentication required")
+            })?;
             if token_str.is_empty() {
-                return Err(Status::unauthenticated(
-                    "Authentication required: empty token",
-                ));
+                warn!("Received request with empty authorization token");
+                return Err(Status::unauthenticated("Authentication required"));
             }
             Ok(req)
         }
-        None => Err(Status::unauthenticated("Authentication required")),
+        None => {
+            warn!("Received unauthenticated request - missing authorization header");
+            Err(Status::unauthenticated("Authentication required"))
+        }
     }
 }
 
@@ -253,11 +259,21 @@ impl InNetworkPostsService for ThunderServiceImpl {
                         following_list.len(),
                         req.user_id
                     );
-                    // [M-2] Security Fix: Use checked conversion for i64->u64,
+                    // [M-2] Security Fix (CWE-681): Use checked conversion for i64->u64,
                     // filtering out any negative IDs that cannot be valid user IDs.
+                    // Negative values from Strato are logged for monitoring and skipped.
                     following_list
                         .into_iter()
-                        .filter_map(|id| u64::try_from(id).ok())
+                        .filter_map(|id| match u64::try_from(id) {
+                            Ok(uid) => Some(uid),
+                            Err(_) => {
+                                warn!(
+                                    "Skipping negative following user ID {} for user {}",
+                                    id, req.user_id
+                                );
+                                None
+                            }
+                        })
                         .collect()
                 }
                 Err(e) => {
@@ -331,9 +347,16 @@ impl InNetworkPostsService for ThunderServiceImpl {
         let proto_posts = tokio::task::spawn_blocking(move || {
             // [M-2] Security Fix (CWE-681 / OWASP A10:2025): Use checked integer
             // conversion. Filter out IDs that exceed i64::MAX rather than silently wrapping.
+            // Out-of-range IDs are logged for monitoring and excluded from the set.
             let exclude_tweet_ids: HashSet<i64> = exclude_tweet_ids
                 .iter()
-                .filter_map(|&id| i64::try_from(id).ok())
+                .filter_map(|&id| match i64::try_from(id) {
+                    Ok(iid) => Some(iid),
+                    Err(_) => {
+                        warn!("Skipping exclude_tweet_id {} exceeding i64 range", id);
+                        None
+                    }
+                })
                 .collect();
 
             let start_time = Instant::now();
