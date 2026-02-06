@@ -1,4 +1,3 @@
-use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use std::cmp::Reverse;
 use std::collections::HashSet;
