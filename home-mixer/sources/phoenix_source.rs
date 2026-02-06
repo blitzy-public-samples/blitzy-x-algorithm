@@ -40,7 +40,6 @@ impl Source<ScoredPostsQuery, PostCandidate> for PhoenixSource {
             .map(|tweet_info| PostCandidate {
                 tweet_id: tweet_info.tweet_id as i64,
                 author_id: tweet_info.author_id,
-                in_reply_to_tweet_id: Some(tweet_info.in_reply_to_tweet_id),
                 served_type: Some(pb::ServedType::ForYouPhoenixRetrieval),
                 ..Default::default()
             })

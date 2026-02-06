@@ -1,0 +1,8 @@
+[package]
+name = "xai_visibility_filtering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tonic = { version = "0.12", features = ["default"] }
+xai_twittercontext_proto = { path = "../xai_twittercontext_proto" }

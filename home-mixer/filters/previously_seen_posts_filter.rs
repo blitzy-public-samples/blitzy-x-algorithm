@@ -24,7 +24,7 @@ impl Filter<ScoredPostsQuery, PostCandidate> for PreviouslySeenPostsFilter {
 
         let (removed, kept): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|c| {
             get_related_post_ids(c).iter().any(|&post_id| {
-                query.seen_ids.contains(&post_id)
+                query.seen_ids.contains(&(post_id as i64))
                     || bloom_filters
                         .iter()
                         .any(|filter| filter.may_contain(post_id))

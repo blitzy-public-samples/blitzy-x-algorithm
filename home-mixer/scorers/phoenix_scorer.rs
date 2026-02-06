@@ -22,7 +22,7 @@ impl Scorer<ScoredPostsQuery, PostCandidate> for PhoenixScorer {
         candidates: &[PostCandidate],
     ) -> Result<Vec<PostCandidate>, String> {
         let user_id = query.user_id as u64;
-        let prediction_request_id = request_util::generate_request_id();
+        let prediction_request_id = request_util::generate_numeric_request_id();
         let last_scored_at_ms = Self::current_timestamp_millis();
 
         if let Some(sequence) = &query.user_action_sequence {

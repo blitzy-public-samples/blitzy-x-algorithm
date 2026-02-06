@@ -20,7 +20,7 @@ impl Filter<ScoredPostsQuery, PostCandidate> for PreviouslyServedPostsFilter {
         let (removed, kept): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|c| {
             get_related_post_ids(c)
                 .iter()
-                .any(|id| query.served_ids.contains(id))
+                .any(|&id| query.served_ids.contains(&(id as i64)))
         });
 
         Ok(FilterResult { kept, removed })

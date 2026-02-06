@@ -36,7 +36,7 @@ impl Source<ScoredPostsQuery, PostCandidate> for ThunderSource {
         };
 
         let response = client
-            .get_in_network_posts(request)
+            .get_in_network_posts(tonic::Request::new(request))
             .await
             .map_err(|e| format!("ThunderSource: {}", e))?;
 

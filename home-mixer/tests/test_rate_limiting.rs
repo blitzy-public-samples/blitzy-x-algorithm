@@ -156,7 +156,7 @@ impl ScoredPostsService for RateLimitedMockServer {
 /// in `get_scored_posts` occurs **before** any request body processing.
 /// The `viewer_id` is set to a non-zero value to avoid triggering unrelated
 /// validation errors in tests that verify non-rate-limited behavior.
-fn make_test_request(viewer_id: u64) -> Request<ScoredPostsQuery> {
+fn make_test_request(viewer_id: i64) -> Request<ScoredPostsQuery> {
     Request::new(ScoredPostsQuery {
         viewer_id,
         ..Default::default()
@@ -383,7 +383,7 @@ async fn test_rate_limit_with_zero_concurrent_limit() {
     let server = RateLimitedMockServer::with_limit(0);
 
     // Send 5 sequential requests — every one should be immediately rejected
-    for request_index in 0..5u64 {
+    for request_index in 0..5i64 {
         let result = server
             .get_scored_posts(make_test_request(1000 + request_index))
             .await;
@@ -519,8 +519,8 @@ async fn test_rate_limiting_checked_before_input_validation() {
     // "Send a GetScoredPosts request with 100,000+ entries in seen_ids."
     let query = ScoredPostsQuery {
         viewer_id: 1001,
-        seen_ids: vec![0u64; 100_000],
-        served_ids: vec![0u64; 100_000],
+        seen_ids: vec![0i64; 100_000],
+        served_ids: vec![0i64; 100_000],
         ..Default::default()
     };
 

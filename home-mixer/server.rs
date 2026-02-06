@@ -20,6 +20,7 @@ const MAX_SEEN_IDS: usize = 10_000;
 const MAX_SERVED_IDS: usize = 10_000;
 const MAX_BLOOM_FILTER_ENTRIES: usize = 50_000;
 
+#[derive(Clone)]
 pub struct HomeMixerServer {
     phx_candidate_pipeline: Arc<PhoenixCandidatePipeline>,
     /// [M-5] Semaphore to limit concurrent requests and prevent overload
@@ -80,7 +81,7 @@ impl pb::scored_posts_service_server::ScoredPostsService for HomeMixerServer {
         // [H-5] Secondary validation (defense in depth): ensure the client-supplied
         // viewer_id is non-zero and matches the authenticated identity extracted
         // from the token claims. Prevents identity spoofing via mismatched IDs.
-        if proto_query.viewer_id == 0 || proto_query.viewer_id != verified_viewer_id {
+        if proto_query.viewer_id == 0 || proto_query.viewer_id != verified_viewer_id as i64 {
             return Err(Status::permission_denied(
                 "viewer_id does not match authenticated identity",
             ));
