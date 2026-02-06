@@ -20,6 +20,17 @@ where
         true
     }
 
+    /// Indicates whether this filter is safety-critical.
+    /// Safety-critical filters (e.g., visibility/content safety filters) will
+    /// cause ALL candidates to be dropped if the filter fails (fail-closed behavior).
+    /// Non-safety-critical filters retain the default fail-open behavior where
+    /// candidates are restored from a pre-filter backup on error.
+    /// Override this to return `true` for content safety, visibility filtering,
+    /// or other filters where bypassing the filter on error would be a security risk.
+    fn is_safety_critical(&self) -> bool {
+        false
+    }
+
     /// Filter candidates by evaluating each against some criteria.
     /// Returns a FilterResult containing kept candidates (which continue to the next stage)
     /// and removed candidates (which are excluded from further processing).
