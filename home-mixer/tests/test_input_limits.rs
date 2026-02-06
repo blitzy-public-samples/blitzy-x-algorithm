@@ -95,11 +95,9 @@ fn generate_test_auth_token(viewer_id: u64) -> String {
 /// server's token validation. Called at the start of each test to ensure the
 /// auth layer accepts the test-generated tokens.
 fn setup_test_env() {
-    // SAFETY: This is safe in a test context. All tests use the same secret value
-    // so concurrent test execution does not cause env var conflicts.
-    unsafe {
-        std::env::set_var("AUTH_TOKEN_SECRET", TEST_AUTH_SECRET);
-    }
+    // All tests use the same secret value so concurrent test execution does not
+    // cause env var conflicts.
+    std::env::set_var("AUTH_TOKEN_SECRET", TEST_AUTH_SECRET);
 }
 
 /// Creates a `tonic::Request<ScoredPostsQuery>` pre-populated with a valid
