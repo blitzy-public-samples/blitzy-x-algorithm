@@ -744,7 +744,8 @@ async fn test_integer_overflow_error_message_is_safe() {
     // SECONDARY ASSERTION: If the implementation ever changes to return Err,
     // verify the error message does not contain sensitive conversion details.
     // This future-proofs the test against implementation changes.
-    let second_result = hydrator.hydrate(&query, &candidates).await;
+    let second_result: Result<Vec<PostCandidate>, String> =
+        hydrator.hydrate(&query, &candidates).await;
     if let Err(ref err_msg) = second_result {
         // Verify no raw numeric values are exposed
         assert!(
