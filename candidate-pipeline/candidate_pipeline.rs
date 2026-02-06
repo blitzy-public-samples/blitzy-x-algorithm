@@ -234,6 +234,14 @@ where
     }
 
     // Shared helper to run filters sequentially from a provided filter list.
+    //
+    // [H-4] CWE-636 / OWASP A04:2025 — Fail-closed content safety enforcement:
+    // Filters that declare themselves as safety-critical (via `is_safety_critical()`)
+    // use fail-closed error handling: on failure, ALL candidates are dropped rather
+    // than restored from a pre-filter backup. This prevents serving unfiltered
+    // content when a safety service (e.g., Visibility Filtering) is unavailable.
+    // Non-safety-critical filters retain the original fail-open behavior where
+    // candidates are restored from backup on error.
     async fn run_filters(
         &self,
         query: &Q,
@@ -244,7 +252,14 @@ where
         let request_id = query.request_id().to_string();
         let mut all_removed = Vec::new();
         for filter in filters.iter().filter(|f| f.enable(query)) {
-            let backup = candidates.clone();
+            // [H-4] Optimization: only clone backup for non-safety-critical filters.
+            // Safety-critical filters drop all candidates on error (fail-closed),
+            // so the clone overhead is unnecessary.
+            let backup = if filter.is_safety_critical() {
+                Vec::new()
+            } else {
+                candidates.clone()
+            };
             match filter.filter(query, candidates).await {
                 Ok(result) => {
                     candidates = result.kept;
@@ -252,6 +267,10 @@ where
                 }
                 Err(err) => {
                     if filter.is_safety_critical() {
+                        // [H-4] Fail-closed: safety-critical filter failure drops ALL
+                        // candidates to prevent serving unfiltered content. VF service
+                        // outages produce zero results rather than bypassing content
+                        // safety checks — an intentional safety-over-availability trade-off.
                         error!(
                             "request_id={} stage={:?} component={} SAFETY-CRITICAL filter failed, dropping ALL candidates: {}",
                             request_id,
@@ -261,6 +280,8 @@ where
                         );
                         candidates = Vec::new();
                     } else {
+                        // Fail-open: non-critical filter failure restores candidates
+                        // from pre-filter backup to preserve availability.
                         error!(
                             "request_id={} stage={:?} component={} failed (non-critical, restoring backup): {}",
                             request_id,
