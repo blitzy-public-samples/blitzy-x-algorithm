@@ -16,14 +16,14 @@
 
 use std::sync::Arc;
 
-use candidate_pipeline::candidate_pipeline::{CandidatePipeline, HasRequestId};
-use candidate_pipeline::filter::{Filter, FilterResult};
-use candidate_pipeline::hydrator::Hydrator;
-use candidate_pipeline::query_hydrator::QueryHydrator;
-use candidate_pipeline::scorer::Scorer;
-use candidate_pipeline::selector::Selector;
-use candidate_pipeline::side_effect::SideEffect;
-use candidate_pipeline::source::Source;
+use xai_candidate_pipeline::candidate_pipeline::{CandidatePipeline, HasRequestId};
+use xai_candidate_pipeline::filter::{Filter, FilterResult};
+use xai_candidate_pipeline::hydrator::Hydrator;
+use xai_candidate_pipeline::query_hydrator::QueryHydrator;
+use xai_candidate_pipeline::scorer::Scorer;
+use xai_candidate_pipeline::selector::Selector;
+use xai_candidate_pipeline::side_effect::SideEffect;
+use xai_candidate_pipeline::source::Source;
 use tonic::async_trait;
 
 // ---------------------------------------------------------------------------
