@@ -199,9 +199,7 @@ fn validate_auth_token(token: &str) -> Result<u64, String> {
     // Split token into exactly three dot-separated components
     let parts: Vec<&str> = token.splitn(3, '.').collect();
     if parts.len() != 3 {
-        return Err(
-            "Malformed token: expected '<viewer_id>.<expiry>.<signature>'".to_string(),
-        );
+        return Err("Malformed token: expected '<viewer_id>.<expiry>.<signature>'".to_string());
     }
 
     let (viewer_id_str, expiry_str, provided_sig) = (parts[0], parts[1], parts[2]);
