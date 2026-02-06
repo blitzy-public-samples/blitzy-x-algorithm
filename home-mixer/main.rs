@@ -51,19 +51,21 @@ async fn main() -> anyhow::Result<()> {
             .send_compressed(CompressionEncoding::Zstd),
     );
 
-    // [L-2] Security Fix (CWE-489 / OWASP A02:2025): Gate gRPC reflection
-    // behind the ENABLE_GRPC_REFLECTION environment variable. gRPC reflection
-    // exposes the complete service schema to any client, enabling service
-    // enumeration. In production this should be disabled.
+    // [L-2] Security fix: Gate gRPC reflection behind ENABLE_GRPC_REFLECTION env var
+    // (CWE-489 / OWASP A02:2025) — gRPC reflection exposes the full service schema
+    // to any client that can reach the gRPC port, enabling API enumeration by
+    // unauthorized clients. Disabled by default to prevent service schema exposure
+    // in production environments.
     let enable_reflection = std::env::var("ENABLE_GRPC_REFLECTION")
-        .unwrap_or_default()
-        .eq_ignore_ascii_case("true");
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     if enable_reflection {
         let reflection_service = Builder::configure()
             .register_encoded_file_descriptor_set(pb::FILE_DESCRIPTOR_SET)
             .build_v1()?;
         grpc_routes.add_service(reflection_service);
-        info!("gRPC reflection enabled via ENABLE_GRPC_REFLECTION");
+        info!("gRPC reflection enabled");
     } else {
         info!("gRPC reflection disabled (set ENABLE_GRPC_REFLECTION=true to enable)");
     }
