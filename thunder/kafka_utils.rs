@@ -54,9 +54,11 @@ pub async fn start_kafka(
     let sasl_password = std::env::var("KAFKA_SASL_PASSWORD")
         .ok()
         .or(args.sasl_password.clone())
-        .ok_or_else(|| anyhow::anyhow!(
-            "KAFKA_SASL_PASSWORD environment variable or --sasl-password flag must be set"
-        ))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "KAFKA_SASL_PASSWORD environment variable or --sasl-password flag must be set"
+            )
+        })?;
 
     // [C-1] Security Fix: Same pattern for producer SASL password.
     let producer_sasl_password = std::env::var("KAFKA_PRODUCER_SASL_PASSWORD")

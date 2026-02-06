@@ -132,10 +132,7 @@ fn deserialize_batch(
     let num_messages = messages.len();
     let results = deserialize_kafka_messages(messages, deserialize_tweet_event_v2)?;
     let deser_elapsed = start_time.elapsed();
-    if DESER_LOG_COUNTER
-        .fetch_add(1, Ordering::Relaxed)
-        % 1000 == 0
-    {
+    if DESER_LOG_COUNTER.fetch_add(1, Ordering::Relaxed) % 1000 == 0 {
         info!(
             "Deserialized {} messages in {:?} ({:.2} msgs/sec)",
             num_messages,

@@ -12,8 +12,8 @@ use xai_thunder_proto::{
 };
 
 use crate::{
-    config::MIN_VIDEO_DURATION_MS,
     args::Args,
+    config::MIN_VIDEO_DURATION_MS,
     deserializer::deserialize_tweet_event,
     kafka::utils::{create_kafka_consumer, deserialize_kafka_messages},
     metrics,
