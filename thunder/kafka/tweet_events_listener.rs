@@ -1,19 +1,19 @@
 use anyhow::{Context, Result};
 use log::{error, info, warn};
 use prost::Message;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use xai_kafka::{KafkaMessage, config::KafkaConsumerConfig, consumer::KafkaConsumer};
+use xai_kafka::{config::KafkaConsumerConfig, consumer::KafkaConsumer, KafkaMessage};
 use xai_kafka::{KafkaProducer, KafkaProducerConfig};
 use xai_thunder_proto::{
-    InNetworkEvent, LightPost, TweetCreateEvent, TweetDeleteEvent, in_network_event,
+    in_network_event, InNetworkEvent, LightPost, TweetCreateEvent, TweetDeleteEvent,
 };
 
 use crate::{
     args::Args,
-    crate::config::MIN_VIDEO_DURATION_MS,
+    config::MIN_VIDEO_DURATION_MS,
     deserializer::deserialize_tweet_event,
     kafka::utils::{create_kafka_consumer, deserialize_kafka_messages},
     metrics,
@@ -22,6 +22,11 @@ use crate::{
 
 /// Counter for logging batch processing every Nth time
 static BATCH_LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Maximum number of messages allowed in the message buffer to prevent unbounded memory growth
+/// from burst Kafka traffic. If the buffer exceeds this limit, excess messages are dropped
+/// and a warning is logged. (Security fix M-3: CWE-770 / OWASP A10:2025)
+const MAX_BUFFER_SIZE: usize = 100_000;
 
 /// Monitor Kafka partition lag and update metrics
 async fn monitor_partition_lag(
@@ -110,7 +115,11 @@ pub async fn start_tweet_event_processing(
         info!("Kafka producer enabled, starting producer...");
         let producer = Arc::new(RwLock::new(KafkaProducer::new(producer_config)));
         if let Err(e) = producer.write().await.start().await {
-            panic!("Failed to start Kafka producer: {:#}", e);
+            // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!() with
+            // error logging and graceful return. Panicking inside a tokio::spawn silently
+            // terminates the task with no restart mechanism.
+            log::error!("Failed to start Kafka producer: {:#}", e);
+            return;
         }
         Some(producer)
     } else {
@@ -172,17 +181,26 @@ fn spawn_processing_threads(
                     )
                     .await
                     {
-                        panic!(
+                        // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                        // with error logging and graceful return. Panicking inside a
+                        // tokio::spawn silently terminates the task with no restart.
+                        log::error!(
                             "Tweet events processing thread {} exited unexpectedly: {:#}. This is a critical failure - the feeder cannot function without tweet event processing.",
                             thread_id, e
                         );
+                        return;
                     }
                 }
                 Err(e) => {
-                    panic!(
+                    // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                    // with error logging and graceful return. Panicking inside a
+                    // tokio::spawn silently terminates the task with no restart.
+                    log::error!(
                         "Failed to create consumer for thread {}: {:#}",
-                        thread_id, e
+                        thread_id,
+                        e
                     );
+                    return;
                 }
             }
         });
@@ -205,32 +223,97 @@ async fn process_message_batch(
 
     let len_posts = results.len();
 
+    // [H-1] Security Fix (CWE-252 / OWASP A10:2025): Replace .unwrap() with
+    // .unwrap_or_default() for SystemTime to prevent panic on clock anomalies
+    // (e.g., NTP time jumps before epoch). Matches safe pattern at post_store.rs:88-90.
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs() as i64;
 
+    // [H-1] Security Fix (CWE-252 / OWASP A10:2025): All .unwrap() calls on
+    // deserialized protobuf Option fields have been replaced with match/if-let
+    // patterns that skip and log malformed messages. A single malformed Kafka
+    // message previously caused a panic that killed the consumer task silently.
     for tweet_event in results {
-        let data = tweet_event.data.unwrap();
+        let data = match tweet_event.data {
+            Some(data) => data,
+            None => {
+                warn!("Skipping tweet event with missing data field");
+                continue;
+            }
+        };
 
         match data {
             TweetEventData::TweetCreateEvent(create_event) => {
-                first_post_id = create_event.tweet.as_ref().unwrap().id.unwrap();
-                first_user_id = create_event.user.as_ref().unwrap().id.unwrap();
+                // Safely extract tweet reference
+                let tweet = match create_event.tweet.as_ref() {
+                    Some(t) => t,
+                    None => {
+                        warn!("Skipping TweetCreateEvent with missing tweet field");
+                        continue;
+                    }
+                };
+                // Safely extract user reference
+                let user = match create_event.user.as_ref() {
+                    Some(u) => u,
+                    None => {
+                        warn!("Skipping TweetCreateEvent with missing user field");
+                        continue;
+                    }
+                };
+                // Safely extract tweet ID
+                let tweet_id = match tweet.id {
+                    Some(id) => id,
+                    None => {
+                        warn!("Skipping TweetCreateEvent with missing tweet.id");
+                        continue;
+                    }
+                };
+                // Safely extract user ID
+                let user_id = match user.id {
+                    Some(id) => id,
+                    None => {
+                        warn!("Skipping TweetCreateEvent with missing user.id");
+                        continue;
+                    }
+                };
 
-                let tweet = create_event.tweet.as_ref().unwrap();
-                let core_data = tweet.core_data.as_ref().unwrap();
+                first_post_id = tweet_id;
+                first_user_id = user_id;
 
-                if let Some(nullcast) = core_data.nullcast
-                    && nullcast
-                {
+                // Safely extract core_data
+                let core_data = match tweet.core_data.as_ref() {
+                    Some(cd) => cd,
+                    None => {
+                        warn!(
+                            "Skipping TweetCreateEvent with missing core_data for tweet_id={}",
+                            tweet_id
+                        );
+                        continue;
+                    }
+                };
+
+                if let Some(true) = core_data.nullcast {
                     continue;
                 }
 
+                // Safely extract created_at_secs
+                let created_at = match core_data.created_at_secs {
+                    Some(ts) => ts,
+                    None => {
+                        warn!(
+                            "Skipping TweetCreateEvent with missing created_at_secs for tweet_id={}",
+                            tweet_id
+                        );
+                        continue;
+                    }
+                };
+
                 create_tweets.push(LightPost {
-                    post_id: tweet.id.unwrap(),
-                    author_id: create_event.user.as_ref().unwrap().id.unwrap(),
-                    created_at: core_data.created_at_secs.unwrap(),
+                    post_id: tweet_id,
+                    author_id: user_id,
+                    created_at,
                     in_reply_to_post_id: core_data
                         .reply
                         .as_ref()
@@ -248,25 +331,51 @@ async fn process_message_batch(
                 });
             }
             TweetEventData::TweetDeleteEvent(delete_event) => {
-                let created_at_secs = delete_event
-                    .tweet
-                    .as_ref()
-                    .unwrap()
-                    .core_data
-                    .as_ref()
-                    .unwrap()
-                    .created_at_secs
-                    .unwrap();
+                // Safely extract nested fields for delete events
+                let tweet_ref = match delete_event.tweet.as_ref() {
+                    Some(t) => t,
+                    None => {
+                        warn!("Skipping TweetDeleteEvent with missing tweet field");
+                        continue;
+                    }
+                };
+                let core_data_ref = match tweet_ref.core_data.as_ref() {
+                    Some(cd) => cd,
+                    None => {
+                        warn!("Skipping TweetDeleteEvent with missing core_data field");
+                        continue;
+                    }
+                };
+                let created_at_secs = match core_data_ref.created_at_secs {
+                    Some(ts) => ts,
+                    None => {
+                        warn!("Skipping TweetDeleteEvent with missing created_at_secs");
+                        continue;
+                    }
+                };
+
                 if now_secs - created_at_secs > post_retention_sec {
                     continue;
                 }
-                delete_tweets.push(delete_event.tweet.as_ref().unwrap().id.unwrap());
+
+                let delete_id = match tweet_ref.id {
+                    Some(id) => id,
+                    None => {
+                        warn!("Skipping TweetDeleteEvent with missing tweet.id");
+                        continue;
+                    }
+                };
+                delete_tweets.push(delete_id);
             }
             TweetEventData::QuotedTweetDeleteEvent(delete_event) => {
-                delete_tweets.push(delete_event.quoting_tweet_id.unwrap());
-            }
-            _ => {
-                log::info!("Other non post creation/deletion event")
+                let quoting_id = match delete_event.quoting_tweet_id {
+                    Some(id) => id,
+                    None => {
+                        warn!("Skipping QuotedTweetDeleteEvent with missing quoting_tweet_id");
+                        continue;
+                    }
+                };
+                delete_tweets.push(quoting_id);
             }
         }
     }
@@ -331,7 +440,7 @@ async fn process_message_batch(
 
     // Log every 100th batch
     let batch_count = BATCH_LOG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    if batch_count.is_multiple_of(1000) {
+    if batch_count % 1000 == 0 {
         info!(
             "Batch processing milestone: processed {} batches total, latest batch {} had {} posts (first: post_id={}, user_id={})",
             batch_count + 1,
@@ -357,13 +466,27 @@ async fn process_tweet_events(
 
     loop {
         let poll_result = {
-            let mut consumer_lock = consumer.write().await;
+            let consumer_lock = consumer.write().await;
             consumer_lock.poll(100).await
         };
 
         match poll_result {
             Ok(messages) => {
-                message_buffer.extend(messages);
+                // [M-3] Security Fix (CWE-770 / OWASP A10:2025): Cap the
+                // message buffer to prevent unbounded memory growth from burst
+                // Kafka traffic or a flood attack on the topic.
+                let available_capacity = MAX_BUFFER_SIZE.saturating_sub(message_buffer.len());
+                if messages.len() > available_capacity {
+                    warn!(
+                        "Message buffer at capacity ({}/{}), dropping {} excess messages",
+                        message_buffer.len(),
+                        MAX_BUFFER_SIZE,
+                        messages.len() - available_capacity
+                    );
+                    message_buffer.extend(messages.into_iter().take(available_capacity));
+                } else {
+                    message_buffer.extend(messages);
+                }
 
                 // Process batch when we have enough messages
                 if message_buffer.len() >= batch_size {

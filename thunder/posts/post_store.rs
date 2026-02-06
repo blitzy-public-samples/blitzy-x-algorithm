@@ -12,8 +12,8 @@ use crate::config::{
 };
 use crate::metrics::{
     POST_STORE_DELETED_POSTS, POST_STORE_DELETED_POSTS_FILTERED, POST_STORE_ENTITY_COUNT,
-    POST_STORE_POSTS_RETURNED, POST_STORE_POSTS_RETURNED_RATIO, POST_STORE_REQUEST_TIMEOUTS,
-    POST_STORE_REQUESTS, POST_STORE_TOTAL_POSTS, POST_STORE_USER_COUNT,
+    POST_STORE_POSTS_RETURNED, POST_STORE_POSTS_RETURNED_RATIO, POST_STORE_REQUESTS,
+    POST_STORE_REQUEST_TIMEOUTS, POST_STORE_TOTAL_POSTS, POST_STORE_USER_COUNT,
 };
 
 /// Minimal post reference stored in user timelines (only ID and timestamp)
@@ -147,12 +147,12 @@ impl PostStore {
             let mut video_eligible = post.has_video;
 
             // If this is a retweet and the retweeted post has video, mark has_video as true
-            if !video_eligible
-                && post.is_retweet
-                && let Some(source_post_id) = post.source_post_id
-                && let Some(source_post) = self.posts.get(&source_post_id)
-            {
-                video_eligible = !source_post.is_reply && source_post.has_video;
+            if !video_eligible && post.is_retweet {
+                if let Some(source_post_id) = post.source_post_id {
+                    if let Some(source_post) = self.posts.get(&source_post_id) {
+                        video_eligible = !source_post.is_reply && source_post.has_video;
+                    }
+                }
             }
 
             if post.is_reply {
@@ -292,7 +292,7 @@ impl PostStore {
                     if following_users.is_empty() {
                         return true;
                     }
-                    post.in_reply_to_post_id.is_none_or(|reply_to_post_id| {
+                    post.in_reply_to_post_id.map_or(true, |reply_to_post_id| {
                         if let Some(replied_to_post) = self.posts.get(&reply_to_post_id) {
                             if !replied_to_post.is_retweet && !replied_to_post.is_reply {
                                 return true;
@@ -415,9 +415,14 @@ impl PostStore {
         let retention_seconds = self.retention_seconds;
 
         tokio::task::spawn_blocking(move || {
+            // [L-1] Security Fix (CWE-252 / OWASP A10:2025): Replace .unwrap()
+            // with .unwrap_or_default() to prevent panic on clock anomalies
+            // (e.g., NTP time jumps before epoch). With the default (zero seconds),
+            // the trim operation treats all posts as within retention, preventing
+            // data loss. This matches the safe pattern at lines 88-90.
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs();
 
             let mut total_trimmed = 0;

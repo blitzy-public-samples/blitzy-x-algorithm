@@ -9,8 +9,8 @@ use tonic_reflection::server::Builder;
 use xai_home_mixer_proto as pb;
 use xai_http_server::{CancellationToken, GrpcConfig, HttpServer};
 
-use xai_home_mixer::HomeMixerServer;
 use xai_home_mixer::params;
+use xai_home_mixer::HomeMixerServer;
 
 #[derive(Parser, Debug)]
 #[command(about = "HomeMixer gRPC Server")]
@@ -38,10 +38,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Create the service implementation
     let service = HomeMixerServer::new().await;
-    // Keep a reference to stats_receiver before service is moved
-    let reflection_service = Builder::configure()
-        .register_encoded_file_descriptor_set(pb::FILE_DESCRIPTOR_SET)
-        .build_v1()?;
 
     let mut grpc_routes = RoutesBuilder::default();
 
@@ -55,7 +51,24 @@ async fn main() -> anyhow::Result<()> {
             .send_compressed(CompressionEncoding::Zstd),
     );
 
-    grpc_routes.add_service(reflection_service);
+    // [L-2] Security fix: Gate gRPC reflection behind ENABLE_GRPC_REFLECTION env var
+    // (CWE-489 / OWASP A02:2025) — gRPC reflection exposes the full service schema
+    // to any client that can reach the gRPC port, enabling API enumeration by
+    // unauthorized clients. Disabled by default to prevent service schema exposure
+    // in production environments.
+    let enable_reflection = std::env::var("ENABLE_GRPC_REFLECTION")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    if enable_reflection {
+        let reflection_service = Builder::configure()
+            .register_encoded_file_descriptor_set(pb::FILE_DESCRIPTOR_SET)
+            .build_v1()?;
+        grpc_routes.add_service(reflection_service);
+        info!("gRPC reflection enabled");
+    } else {
+        info!("gRPC reflection disabled (set ENABLE_GRPC_REFLECTION=true to enable)");
+    }
 
     let grpc_config = GrpcConfig::new(args.grpc_port, grpc_routes.routes());
 

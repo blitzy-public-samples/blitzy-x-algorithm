@@ -1,5 +1,5 @@
-mod candidate_hydrators;
-mod candidate_pipeline;
+pub mod candidate_hydrators;
+pub mod candidate_pipeline;
 pub mod clients; // Excluded from open source release for security reasons
 mod filters;
 pub mod params; // Excluded from open source release for security reasons

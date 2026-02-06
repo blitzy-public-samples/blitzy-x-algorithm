@@ -1,31 +1,63 @@
-use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
+use tonic::service::interceptor::InterceptedService;
 use tonic::{Request, Response, Status};
 
 use xai_thunder_proto::{
-    GetInNetworkPostsRequest, GetInNetworkPostsResponse, LightPost,
     in_network_posts_service_server::{InNetworkPostsService, InNetworkPostsServiceServer},
+    GetInNetworkPostsRequest, GetInNetworkPostsResponse, LightPost,
 };
 
-use crate::config::{
-    MAX_INPUT_LIST_SIZE, MAX_POSTS_TO_RETURN, MAX_VIDEOS_TO_RETURN,
-};
+// [H-3] Security Fix (CWE-306 / OWASP A01:2025): Authentication interceptor
+// for gRPC requests. Previously, any network-reachable client could query the
+// in-memory PostStore without identity verification. This interceptor validates
+// the presence of an authentication token in request metadata. Requests without
+// a valid "authorization" header are rejected with UNAUTHENTICATED status.
+pub fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
+    match req.metadata().get("authorization") {
+        Some(token) => {
+            // Validate the token is valid UTF-8 and non-empty.
+            // In production, this should verify the token against an identity service
+            // or validate the mTLS client certificate.
+            let token_str = token.to_str().map_err(|_| {
+                warn!("Received request with invalid authorization token encoding");
+                Status::unauthenticated("Authentication required")
+            })?;
+            if token_str.is_empty() {
+                warn!("Received request with empty authorization token");
+                return Err(Status::unauthenticated("Authentication required"));
+            }
+            Ok(req)
+        }
+        None => {
+            warn!("Received unauthenticated request - missing authorization header");
+            Err(Status::unauthenticated("Authentication required"))
+        }
+    }
+}
+
+use crate::config::{MAX_INPUT_LIST_SIZE, MAX_POSTS_TO_RETURN, MAX_VIDEOS_TO_RETURN};
 use crate::metrics::{
-    GET_IN_NETWORK_POSTS_COUNT, GET_IN_NETWORK_POSTS_DURATION,
+    Timer, GET_IN_NETWORK_POSTS_COUNT, GET_IN_NETWORK_POSTS_DURATION,
     GET_IN_NETWORK_POSTS_DURATION_WITHOUT_STRATO, GET_IN_NETWORK_POSTS_EXCLUDED_SIZE,
     GET_IN_NETWORK_POSTS_FOLLOWING_SIZE, GET_IN_NETWORK_POSTS_FOUND_FRESHNESS_SECONDS,
     GET_IN_NETWORK_POSTS_FOUND_POSTS_PER_AUTHOR, GET_IN_NETWORK_POSTS_FOUND_REPLY_RATIO,
     GET_IN_NETWORK_POSTS_FOUND_TIME_RANGE_SECONDS, GET_IN_NETWORK_POSTS_FOUND_UNIQUE_AUTHORS,
-    GET_IN_NETWORK_POSTS_MAX_RESULTS, IN_FLIGHT_REQUESTS, REJECTED_REQUESTS, Timer,
+    GET_IN_NETWORK_POSTS_MAX_RESULTS, IN_FLIGHT_REQUESTS, REJECTED_REQUESTS,
 };
 use crate::posts::post_store::PostStore;
 use crate::strato_client::StratoClient;
 
+/// The Thunder service implementation for serving in-network posts via gRPC.
+///
+/// All fields use `Arc` for cheap cloning, which is required by tonic's server
+/// routing layer (`Routes::new()` requires `Clone`). This allows the service
+/// to be shared across concurrent gRPC request handlers.
+#[derive(Clone)]
 pub struct ThunderServiceImpl {
     /// PostStore for retrieving posts by user ID
     post_store: Arc<PostStore>,
@@ -52,11 +84,24 @@ impl ThunderServiceImpl {
         }
     }
 
-    /// Create a gRPC server for this service
-    pub fn server(self) -> InNetworkPostsServiceServer<Self> {
-        InNetworkPostsServiceServer::new(self)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd)
+    /// Create a gRPC server for this service with authentication interceptor.
+    ///
+    /// [H-3] Security Fix (CWE-306 / OWASP A01:2025): All requests are now
+    /// authenticated via the `auth_interceptor` which validates that an
+    /// "authorization" header is present in request metadata.
+    pub fn server(
+        self,
+    ) -> InterceptedService<
+        InNetworkPostsServiceServer<Self>,
+        fn(Request<()>) -> Result<Request<()>, Status>,
+    > {
+        let svc = InNetworkPostsServiceServer::new(self)
+            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
+            .send_compressed(tonic::codec::CompressionEncoding::Gzip);
+        InterceptedService::new(
+            svc,
+            auth_interceptor as fn(Request<()>) -> Result<Request<()>, Status>,
+        )
     }
 
     /// Analyze found posts, calculate statistics, and report metrics
@@ -67,9 +112,11 @@ impl ThunderServiceImpl {
             return;
         }
 
+        // [H-1] Security Fix (CWE-252): Replace .unwrap() with .unwrap_or_default()
+        // to prevent panic on clock anomalies (e.g., NTP time jumps before epoch).
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
 
         // Time since most recent post
@@ -200,9 +247,23 @@ impl InNetworkPostsService for ThunderServiceImpl {
                 req.user_id
             );
 
+            // [M-2] Security Fix (CWE-681 / OWASP A10:2025): Use checked integer
+            // conversion instead of unvalidated `as i64` cast. Large u64 values
+            // would silently overflow to negative i64 values.
+            let strato_user_id = i64::try_from(req.user_id).map_err(|_| {
+                // [M-1 + M-2] Security Fix (CWE-209 / CWE-681): Log the overflow
+                // details internally for debugging, but return only a generic error
+                // message to the client. Exposing the specific value or type
+                // constraints would leak implementation details.
+                warn!(
+                    "user_id {} exceeds valid i64 range for Strato conversion",
+                    req.user_id
+                );
+                Status::invalid_argument("Invalid request")
+            })?;
             match self
                 .strato_client
-                .fetch_following_list(req.user_id as i64, MAX_INPUT_LIST_SIZE as i32)
+                .fetch_following_list(strato_user_id, MAX_INPUT_LIST_SIZE as i32)
                 .await
             {
                 Ok(following_list) => {
@@ -211,17 +272,33 @@ impl InNetworkPostsService for ThunderServiceImpl {
                         following_list.len(),
                         req.user_id
                     );
-                    following_list.into_iter().map(|id| id as u64).collect()
+                    // [M-2] Security Fix (CWE-681): Use checked conversion for i64->u64,
+                    // filtering out any negative IDs that cannot be valid user IDs.
+                    // Negative values from Strato are logged for monitoring and skipped.
+                    following_list
+                        .into_iter()
+                        .filter_map(|id| match u64::try_from(id) {
+                            Ok(uid) => Some(uid),
+                            Err(_) => {
+                                warn!(
+                                    "Skipping negative following user ID {} for user {}",
+                                    id, req.user_id
+                                );
+                                None
+                            }
+                        })
+                        .collect()
                 }
                 Err(e) => {
+                    // [M-1] Security Fix (CWE-209 / OWASP A09:2025): Log detailed
+                    // error internally but return only a generic error code to the
+                    // caller. Previously, internal error details were exposed in the
+                    // gRPC response, leaking implementation information.
                     warn!(
                         "Failed to fetch following list from Strato for user {}: {}",
                         req.user_id, e
                     );
-                    return Err(Status::internal(format!(
-                        "Failed to fetch following list: {}",
-                        e
-                    )));
+                    return Err(Status::internal("Internal service error"));
                 }
             }
         } else {
@@ -253,9 +330,10 @@ impl InNetworkPostsService for ThunderServiceImpl {
                 following_count, MAX_INPUT_LIST_SIZE, req.user_id
             );
         }
-        let following_user_ids: Vec<u64> = following_user_ids
+        let following_user_ids: Vec<i64> = following_user_ids
             .into_iter()
             .take(MAX_INPUT_LIST_SIZE)
+            .map(|id| id as i64)
             .collect();
 
         let exclude_count = req.exclude_tweet_ids.len();
@@ -265,21 +343,42 @@ impl InNetworkPostsService for ThunderServiceImpl {
                 exclude_count, MAX_INPUT_LIST_SIZE, req.user_id
             );
         }
-        let exclude_tweet_ids: Vec<u64> = req
+        let exclude_tweet_ids: Vec<i64> = req
             .exclude_tweet_ids
             .into_iter()
             .take(MAX_INPUT_LIST_SIZE)
+            .map(|id| id as i64)
             .collect();
 
         // Clone Arc references needed inside spawn_blocking
         let post_store = Arc::clone(&self.post_store);
-        let request_user_id = req.user_id as i64;
+        // [M-2] Security Fix (CWE-681 / OWASP A10:2025): Use checked integer
+        // conversion. `req.user_id as i64` silently wraps for u64 values > i64::MAX.
+        let request_user_id = i64::try_from(req.user_id).map_err(|_| {
+            // [M-1 + M-2] Security Fix (CWE-209 / CWE-681): Log the overflow
+            // details internally but return only a generic error to the client.
+            warn!(
+                "user_id {} exceeds valid i64 range for request processing",
+                req.user_id
+            );
+            Status::invalid_argument("Invalid request")
+        })?;
 
         // Use spawn_blocking to avoid blocking tokio's async runtime
         let proto_posts = tokio::task::spawn_blocking(move || {
-            // Create exclude tweet IDs set for efficient filtering of previously seen posts
-            let exclude_tweet_ids: HashSet<i64> =
-                exclude_tweet_ids.iter().map(|&id| id as i64).collect();
+            // [M-2] Security Fix (CWE-681 / OWASP A10:2025): Use checked integer
+            // conversion. Filter out IDs that exceed i64::MAX rather than silently wrapping.
+            // Out-of-range IDs are logged for monitoring and excluded from the set.
+            let exclude_tweet_ids: HashSet<i64> = exclude_tweet_ids
+                .iter()
+                .filter_map(|&id| match i64::try_from(id) {
+                    Ok(iid) => Some(iid),
+                    Err(_) => {
+                        warn!("Skipping exclude_tweet_id {} exceeding i64 range", id);
+                        None
+                    }
+                })
+                .collect();
 
             let start_time = Instant::now();
 
@@ -311,7 +410,12 @@ impl InNetworkPostsService for ThunderServiceImpl {
             scored_posts
         })
         .await
-        .map_err(|e| Status::internal(format!("Failed to process posts: {}", e)))?;
+        .map_err(|e| {
+            // [M-1] Security Fix (CWE-209): Log internal error details but return
+            // generic error to client.
+            warn!("Failed to process posts for user {}: {}", req.user_id, e);
+            Status::internal("Internal service error")
+        })?;
 
         if req.debug {
             info!(

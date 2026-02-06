@@ -1,0 +1,7 @@
+[package]
+name = "xai_profiling"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xai_http_server = { path = "../xai_http_server" }

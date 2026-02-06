@@ -1,12 +1,12 @@
 use anyhow::Result;
 use log::{info, warn};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Semaphore};
-use xai_kafka::{KafkaMessage, config::KafkaConsumerConfig, consumer::KafkaConsumer};
+use xai_kafka::{config::KafkaConsumerConfig, consumer::KafkaConsumer, KafkaMessage};
 
-use xai_thunder_proto::{LightPost, TweetDeleteEvent, in_network_event};
+use xai_thunder_proto::{in_network_event, LightPost, TweetDeleteEvent};
 
 use crate::{
     args::Args,
@@ -98,17 +98,26 @@ fn spawn_processing_threads_v2(
                     )
                     .await
                     {
-                        panic!(
+                        // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                        // with error logging and graceful return. Panicking inside a
+                        // tokio::spawn silently terminates the task with no restart.
+                        log::error!(
                             "Tweet events processing thread {} exited unexpectedly: {:#}. This is a critical failure - the feeder cannot function without tweet event processing.",
                             thread_id, e
                         );
+                        return;
                     }
                 }
                 Err(e) => {
-                    panic!(
+                    // [H-2] Security Fix (CWE-755 / OWASP A10:2025): Replace panic!()
+                    // with error logging and graceful return. Panicking inside a
+                    // tokio::spawn silently terminates the task with no restart.
+                    log::error!(
                         "Failed to create consumer for thread {}: {:#}",
-                        thread_id, e
+                        thread_id,
+                        e
                     );
+                    return;
                 }
             }
         });
@@ -123,10 +132,7 @@ fn deserialize_batch(
     let num_messages = messages.len();
     let results = deserialize_kafka_messages(messages, deserialize_tweet_event_v2)?;
     let deser_elapsed = start_time.elapsed();
-    if DESER_LOG_COUNTER
-        .fetch_add(1, Ordering::Relaxed)
-        .is_multiple_of(1000)
-    {
+    if DESER_LOG_COUNTER.fetch_add(1, Ordering::Relaxed) % 1000 == 0 {
         info!(
             "Deserialized {} messages in {:?} ({:.2} msgs/sec)",
             num_messages,
@@ -139,7 +145,17 @@ fn deserialize_batch(
     let mut delete_tweets = Vec::with_capacity(10);
 
     for tweet_event in results {
-        match tweet_event.event_variant.unwrap() {
+        // [H-1] Security Fix (CWE-252 / OWASP A10:2025): Replace .unwrap() on
+        // event_variant with safe handling. A single malformed Kafka message with
+        // a missing event_variant previously killed the consumer task.
+        let event_variant = match tweet_event.event_variant {
+            Some(variant) => variant,
+            None => {
+                warn!("Skipping InNetworkEvent with missing event_variant");
+                continue;
+            }
+        };
+        match event_variant {
             in_network_event::EventVariant::TweetCreateEvent(create_event) => {
                 create_tweets.push(LightPost {
                     post_id: create_event.post_id,
@@ -180,7 +196,7 @@ async fn process_tweet_events_v2(
 
     loop {
         let poll_result = {
-            let mut consumer_lock = consumer.write().await;
+            let consumer_lock = consumer.write().await;
             consumer_lock.poll(batch_size).await
         };
 

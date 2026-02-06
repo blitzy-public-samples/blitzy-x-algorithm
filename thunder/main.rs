@@ -59,13 +59,31 @@ async fn main() -> Result<()> {
     .await
     .context("Failed to create HTTP server")?;
 
-    if args.enable_profiling {
+    // [M-4] Security Fix (CWE-489 / OWASP A02:2025): Gate the profiling server
+    // behind BOTH the CLI flag AND the ENABLE_PROFILING environment variable.
+    // Previously, the profiling endpoint was exposed on port 3000 with no access
+    // controls whenever the CLI flag was set, risking debug information exposure
+    // in production environments.
+    if args.enable_profiling
+        && std::env::var("ENABLE_PROFILING")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    {
+        info!("Profiling server enabled, starting on localhost:3000");
         xai_profiling::spawn_server(3000, CancellationToken::new()).await;
+    } else if args.enable_profiling {
+        info!(
+            "Profiling flag set but ENABLE_PROFILING env var not set to 'true', \
+             skipping profiling server"
+        );
     }
 
     // Create channel for post events
     let (tx, mut rx) = tokio::sync::mpsc::channel::<i64>(args.kafka_num_threads);
-    kafka_utils::start_kafka(&args, post_store.clone(), "", tx).await?;
+    // [M-7] Security Fix (CWE-287 / OWASP A07:2025): Replace the empty string
+    // with the actual SASL username from configuration. An empty username weakens
+    // Kafka authentication and may cause silent connection failures.
+    kafka_utils::start_kafka(&args, post_store.clone(), &args.sasl_username, tx).await?;
 
     if args.is_serving {
         // Wait for Kafka catchup signal

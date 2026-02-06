@@ -1,0 +1,47 @@
+[package]
+name = "xai_home_mixer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "home-mixer"
+path = "main.rs"
+
+[dependencies]
+# Core async runtime and gRPC framework
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.12", features = ["default", "transport", "gzip", "zstd"] }
+tonic-reflection = "0.12"
+
+# HTTP framework (used in main.rs for the axum router)
+axum = "0.7"
+
+# Utility crates
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+log = "0.4"
+once_cell = "1"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+
+# Internal platform crates (stubs for local development)
+xai_candidate_pipeline = { path = "../candidate-pipeline" }
+xai_home_mixer_proto = { path = "../stubs/xai_home_mixer_proto" }
+xai_http_server = { path = "../stubs/xai_http_server" }
+xai_init_utils = { path = "../stubs/xai_init_utils" }
+xai_post_text = { path = "../stubs/xai_post_text" }
+xai_recsys_aggregation = { path = "../stubs/xai_recsys_aggregation" }
+xai_recsys_proto = { path = "../stubs/xai_recsys_proto" }
+xai_stats_macro = { path = "../stubs/xai_stats_macro" }
+xai_strato = { path = "../stubs/xai_strato" }
+xai_thunder_proto = { path = "../stubs/xai_thunder_proto" }
+xai_twittercontext_proto = { path = "../stubs/xai_twittercontext_proto" }
+xai_uas_thrift = { path = "../stubs/xai_uas_thrift" }
+xai_visibility_filtering = { path = "../stubs/xai_visibility_filtering" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
