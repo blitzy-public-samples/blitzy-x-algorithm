@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 use xai_kafka::config::{KafkaConfig, KafkaConsumerConfig, SslConfig};
 use xai_kafka::KafkaProducerConfig;

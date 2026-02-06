@@ -134,7 +134,7 @@ fn deserialize_batch(
     let deser_elapsed = start_time.elapsed();
     if DESER_LOG_COUNTER
         .fetch_add(1, Ordering::Relaxed)
-        .is_multiple_of(1000)
+        % 1000 == 0
     {
         info!(
             "Deserialized {} messages in {:?} ({:.2} msgs/sec)",
@@ -199,7 +199,7 @@ async fn process_tweet_events_v2(
 
     loop {
         let poll_result = {
-            let mut consumer_lock = consumer.write().await;
+            let consumer_lock = consumer.write().await;
             consumer_lock.poll(batch_size).await
         };
 

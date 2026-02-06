@@ -2,10 +2,11 @@
 //!
 //! Provides Prometheus-compatible metric types for monitoring Kafka consumers,
 //! PostStore operations, and gRPC request handling. Metrics are exposed as
-//! lazy-initialized global statics using `std::sync::LazyLock`.
+//! lazy-initialized global statics using `lazy_static!`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
+use lazy_static::lazy_static;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
@@ -204,100 +205,93 @@ impl Drop for Timer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Global metric instances — Kafka
-// ---------------------------------------------------------------------------
-
-/// Partition lag per topic/partition (Gauge with labels `[topic, partition]`).
-pub static KAFKA_PARTITION_LAG: LazyLock<GaugeVec> = LazyLock::new(GaugeVec::new);
-
-/// Counter of Kafka poll errors.
-pub static KAFKA_POLL_ERRORS: LazyLock<Counter> = LazyLock::new(Counter::new);
-
-/// Counter of Kafka messages that failed to parse.
-pub static KAFKA_MESSAGES_FAILED_PARSE: LazyLock<Counter> = LazyLock::new(Counter::new);
-
-/// Histogram of batch processing times (seconds).
-pub static BATCH_PROCESSING_TIME: LazyLock<Histogram> = LazyLock::new(Histogram::new);
 
 // ---------------------------------------------------------------------------
-// Global metric instances — PostStore
+// Global metric instances
 // ---------------------------------------------------------------------------
 
-/// Counter of total PostStore read requests.
-pub static POST_STORE_REQUESTS: LazyLock<Counter> = LazyLock::new(Counter::new);
+lazy_static! {
+    // -- Kafka metrics --
 
-/// Counter of PostStore request timeouts.
-pub static POST_STORE_REQUEST_TIMEOUTS: LazyLock<Counter> = LazyLock::new(Counter::new);
+    /// Partition lag per topic/partition (Gauge with labels `[topic, partition]`).
+    pub static ref KAFKA_PARTITION_LAG: GaugeVec = GaugeVec::new();
 
-/// Counter of deleted posts that were filtered out during reads.
-pub static POST_STORE_DELETED_POSTS_FILTERED: LazyLock<Counter> = LazyLock::new(Counter::new);
+    /// Counter of Kafka poll errors.
+    pub static ref KAFKA_POLL_ERRORS: Counter = Counter::new();
 
-/// Gauge of total deleted posts in the store.
-pub static POST_STORE_DELETED_POSTS: LazyLock<Gauge> = LazyLock::new(Gauge::new);
+    /// Counter of Kafka messages that failed to parse.
+    pub static ref KAFKA_MESSAGES_FAILED_PARSE: Counter = Counter::new();
 
-/// Gauge of total posts in the store.
-pub static POST_STORE_TOTAL_POSTS: LazyLock<Gauge> = LazyLock::new(Gauge::new);
+    /// Histogram of batch processing times (seconds).
+    pub static ref BATCH_PROCESSING_TIME: Histogram = Histogram::new();
 
-/// Gauge of total user count in the store.
-pub static POST_STORE_USER_COUNT: LazyLock<Gauge> = LazyLock::new(Gauge::new);
+    // -- PostStore metrics --
 
-/// GaugeVec of entity counts by category (users, posts, original_posts, etc.).
-pub static POST_STORE_ENTITY_COUNT: LazyLock<GaugeVec> = LazyLock::new(GaugeVec::new);
+    /// Counter of total PostStore read requests.
+    pub static ref POST_STORE_REQUESTS: Counter = Counter::new();
 
-/// Histogram of posts returned per request.
-pub static POST_STORE_POSTS_RETURNED: LazyLock<Histogram> = LazyLock::new(Histogram::new);
+    /// Counter of PostStore request timeouts.
+    pub static ref POST_STORE_REQUEST_TIMEOUTS: Counter = Counter::new();
 
-/// Histogram of the ratio of returned posts to available posts.
-pub static POST_STORE_POSTS_RETURNED_RATIO: LazyLock<Histogram> = LazyLock::new(Histogram::new);
+    /// Counter of deleted posts that were filtered out during reads.
+    pub static ref POST_STORE_DELETED_POSTS_FILTERED: Counter = Counter::new();
 
-// ---------------------------------------------------------------------------
-// Global metric instances — gRPC GetInNetworkPosts
-// ---------------------------------------------------------------------------
+    /// Gauge of total deleted posts in the store.
+    pub static ref POST_STORE_DELETED_POSTS: Gauge = Gauge::new();
 
-/// Histogram of result count per GetInNetworkPosts call.
-pub static GET_IN_NETWORK_POSTS_COUNT: LazyLock<Histogram> = LazyLock::new(Histogram::new);
+    /// Gauge of total posts in the store.
+    pub static ref POST_STORE_TOTAL_POSTS: Gauge = Gauge::new();
 
-/// Histogram of total request duration (including Strato calls).
-pub static GET_IN_NETWORK_POSTS_DURATION: LazyLock<Histogram> = LazyLock::new(Histogram::new);
+    /// Gauge of total user count in the store.
+    pub static ref POST_STORE_USER_COUNT: Gauge = Gauge::new();
 
-/// Histogram of request duration excluding Strato fetch time.
-pub static GET_IN_NETWORK_POSTS_DURATION_WITHOUT_STRATO: LazyLock<Histogram> =
-    LazyLock::new(Histogram::new);
+    /// GaugeVec of entity counts by category (users, posts, original_posts, etc.).
+    pub static ref POST_STORE_ENTITY_COUNT: GaugeVec = GaugeVec::new();
 
-/// Histogram of the number of following user IDs in each request.
-pub static GET_IN_NETWORK_POSTS_FOLLOWING_SIZE: LazyLock<Histogram> =
-    LazyLock::new(Histogram::new);
+    /// Histogram of posts returned per request.
+    pub static ref POST_STORE_POSTS_RETURNED: Histogram = Histogram::new();
 
-/// Histogram of the number of excluded tweet IDs in each request.
-pub static GET_IN_NETWORK_POSTS_EXCLUDED_SIZE: LazyLock<Histogram> =
-    LazyLock::new(Histogram::new);
+    /// Histogram of the ratio of returned posts to available posts.
+    pub static ref POST_STORE_POSTS_RETURNED_RATIO: Histogram = Histogram::new();
 
-/// Histogram of max_results parameter per request.
-pub static GET_IN_NETWORK_POSTS_MAX_RESULTS: LazyLock<Histogram> = LazyLock::new(Histogram::new);
+    // -- gRPC GetInNetworkPosts metrics --
 
-/// HistogramVec of post freshness (seconds since most recent post) by stage.
-pub static GET_IN_NETWORK_POSTS_FOUND_FRESHNESS_SECONDS: LazyLock<HistogramVec> =
-    LazyLock::new(HistogramVec::new);
+    /// Histogram of result count per GetInNetworkPosts call.
+    pub static ref GET_IN_NETWORK_POSTS_COUNT: Histogram = Histogram::new();
 
-/// HistogramVec of time range (oldest - newest) by stage.
-pub static GET_IN_NETWORK_POSTS_FOUND_TIME_RANGE_SECONDS: LazyLock<HistogramVec> =
-    LazyLock::new(HistogramVec::new);
+    /// Histogram of total request duration (including Strato calls).
+    pub static ref GET_IN_NETWORK_POSTS_DURATION: Histogram = Histogram::new();
 
-/// HistogramVec of reply ratio by stage.
-pub static GET_IN_NETWORK_POSTS_FOUND_REPLY_RATIO: LazyLock<HistogramVec> =
-    LazyLock::new(HistogramVec::new);
+    /// Histogram of request duration excluding Strato fetch time.
+    pub static ref GET_IN_NETWORK_POSTS_DURATION_WITHOUT_STRATO: Histogram = Histogram::new();
 
-/// HistogramVec of unique author count by stage.
-pub static GET_IN_NETWORK_POSTS_FOUND_UNIQUE_AUTHORS: LazyLock<HistogramVec> =
-    LazyLock::new(HistogramVec::new);
+    /// Histogram of the number of following user IDs in each request.
+    pub static ref GET_IN_NETWORK_POSTS_FOLLOWING_SIZE: Histogram = Histogram::new();
 
-/// HistogramVec of posts-per-author ratio by stage.
-pub static GET_IN_NETWORK_POSTS_FOUND_POSTS_PER_AUTHOR: LazyLock<HistogramVec> =
-    LazyLock::new(HistogramVec::new);
+    /// Histogram of the number of excluded tweet IDs in each request.
+    pub static ref GET_IN_NETWORK_POSTS_EXCLUDED_SIZE: Histogram = Histogram::new();
 
-/// Gauge of currently in-flight requests.
-pub static IN_FLIGHT_REQUESTS: LazyLock<Gauge> = LazyLock::new(Gauge::new);
+    /// Histogram of max_results parameter per request.
+    pub static ref GET_IN_NETWORK_POSTS_MAX_RESULTS: Histogram = Histogram::new();
 
-/// Counter of rejected (load-shed) requests.
-pub static REJECTED_REQUESTS: LazyLock<Counter> = LazyLock::new(Counter::new);
+    /// HistogramVec of post freshness (seconds since most recent post) by stage.
+    pub static ref GET_IN_NETWORK_POSTS_FOUND_FRESHNESS_SECONDS: HistogramVec = HistogramVec::new();
+
+    /// HistogramVec of time range (oldest - newest) by stage.
+    pub static ref GET_IN_NETWORK_POSTS_FOUND_TIME_RANGE_SECONDS: HistogramVec = HistogramVec::new();
+
+    /// HistogramVec of reply ratio by stage.
+    pub static ref GET_IN_NETWORK_POSTS_FOUND_REPLY_RATIO: HistogramVec = HistogramVec::new();
+
+    /// HistogramVec of unique author count by stage.
+    pub static ref GET_IN_NETWORK_POSTS_FOUND_UNIQUE_AUTHORS: HistogramVec = HistogramVec::new();
+
+    /// HistogramVec of posts-per-author ratio by stage.
+    pub static ref GET_IN_NETWORK_POSTS_FOUND_POSTS_PER_AUTHOR: HistogramVec = HistogramVec::new();
+
+    /// Gauge of currently in-flight requests.
+    pub static ref IN_FLIGHT_REQUESTS: Gauge = Gauge::new();
+
+    /// Counter of rejected (load-shed) requests.
+    pub static ref REJECTED_REQUESTS: Counter = Counter::new();
+}

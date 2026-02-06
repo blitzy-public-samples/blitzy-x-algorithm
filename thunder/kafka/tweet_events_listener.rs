@@ -377,9 +377,6 @@ async fn process_message_batch(
                 };
                 delete_tweets.push(quoting_id);
             }
-            _ => {
-                log::info!("Other non post creation/deletion event")
-            }
         }
     }
 
@@ -443,7 +440,7 @@ async fn process_message_batch(
 
     // Log every 100th batch
     let batch_count = BATCH_LOG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    if batch_count.is_multiple_of(1000) {
+    if batch_count % 1000 == 0 {
         info!(
             "Batch processing milestone: processed {} batches total, latest batch {} had {} posts (first: post_id={}, user_id={})",
             batch_count + 1,
@@ -469,7 +466,7 @@ async fn process_tweet_events(
 
     loop {
         let poll_result = {
-            let mut consumer_lock = consumer.write().await;
+            let consumer_lock = consumer.write().await;
             consumer_lock.poll(100).await
         };
 
